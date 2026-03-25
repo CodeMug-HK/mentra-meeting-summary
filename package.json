@@ -10,7 +10,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@google/genai": "^1.0.0",
     "@mentra/sdk": "latest"
   },
   "devDependencies": {

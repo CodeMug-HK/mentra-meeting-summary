@@ -1,14 +1,14 @@
 # Mentra Meeting Summary
 
-AI-powered meeting summary app for **Mentra Live** smart glasses. Records meeting conversations with speaker identification, then generates structured summaries using Gemini or Qwen.
+AI-powered meeting summary app for **Mentra Live** smart glasses. Records meeting conversations with speaker identification, then generates structured summaries using Qwen or MiniMax. Sends results to Telegram.
 
 ## How it works
 
 1. Say **"Start Meeting"** (or press the button) to begin recording
 2. The app captures all speech with automatic speaker identification
 3. Say **"Stop Meeting"** (or press the button) to stop recording
-4. Say **"Summarize"** (or double-press the button) to generate a summary
-5. The AI summary is read aloud via TTS
+4. Say **"Summarize"** (or long-press the button) to generate a summary
+5. The AI summary is read aloud via TTS and sent to Telegram
 
 ## Voice Commands
 
@@ -31,7 +31,7 @@ AI-powered meeting summary app for **Mentra Live** smart glasses. Records meetin
 | Color | Meaning |
 |-------|---------|
 | Green | Recording in progress |
-| Blue | Generating summary |
+| Blue blink | Generating summary |
 | Off | Idle |
 
 ## Setup
@@ -47,13 +47,13 @@ AI-powered meeting summary app for **Mentra Live** smart glasses. Records meetin
 
 Go to [console.mentra.glass](https://console.mentra.glass/) and create a new app:
 - Package name: `io.codemug.meetingsummary`
-- Webhook URL: your ngrok URL
+- Webhook URL: your Fly.io URL or ngrok URL
 - Enable **Microphone** permission
 
 ### 2. Get API keys
 
-- **Gemini**: [Google AI Studio](https://aistudio.google.com/apikey)
-- **Qwen** (optional): [Alibaba Cloud DashScope](https://dashscope.console.aliyun.com/)
+- **Qwen**: [Alibaba Cloud DashScope](https://dashscope.console.aliyun.com/)
+- **MiniMax**: [MiniMax Platform](https://platform.minimaxi.com/)
 
 ### 3. Install & run
 
@@ -64,7 +64,7 @@ cp .env.example .env
 bun run dev
 ```
 
-### 4. Expose with ngrok
+### 4. Expose with ngrok (local dev)
 
 ```bash
 ngrok http --url=<YOUR_NGROK_URL> 3000
@@ -75,8 +75,8 @@ ngrok http --url=<YOUR_NGROK_URL> 3000
 ## Configuration
 
 Set `AI_BACKEND` in `.env` to choose the summarization engine:
-- `gemini` (default) - Google Gemini 2.5 Flash
-- `qwen` - Alibaba Qwen Plus
+- `qwen` (default) - Alibaba Qwen Plus
+- `minimax` - MiniMax M2.5
 
 ## Telegram Notifications
 
@@ -85,12 +85,12 @@ When a meeting summary is generated, it's automatically sent to your Telegram ch
 ## Deployment (Fly.io)
 
 ```bash
-fly launch --name mentra-meeting-summary --region sin
+fly apps create mentra-meeting-summary
 fly secrets set PACKAGE_NAME=io.codemug.meetingsummary
 fly secrets set MENTRAOS_API_KEY=your_key
-fly secrets set GEMINI_API_KEY=your_key
 fly secrets set QWEN_API_KEY=your_key
-fly secrets set AI_BACKEND=gemini
+fly secrets set MINIMAX_API_KEY=your_key
+fly secrets set AI_BACKEND=qwen
 fly secrets set TELEGRAM_BOT_TOKEN=your_bot_token
 fly secrets set TELEGRAM_CHAT_ID=your_chat_id
 fly deploy
@@ -104,7 +104,7 @@ Mentra Live Glasses
     ├── Microphone → MentraOS Cloud → Transcription (with speaker ID)
     │                                       │
     │                                       ▼
-    │                              Your App Server
+    │                              Your App Server (Fly.io)
     │                              ┌─────────────────┐
     │                              │ TranscriptBuffer │
     │                              │ (accumulates     │
@@ -114,11 +114,13 @@ Mentra Live Glasses
     │                                       │
     │                                       ▼ "Summarize"
     │                              ┌─────────────────┐
-    │                              │ Gemini / Qwen   │
+    │                              │ Qwen / MiniMax   │
     │                              │ (generates       │
     │                              │  structured      │
     │                              │  summary)        │
     │                              └────────┬────────┘
     │                                       │
-    ◄── Speaker (TTS) ─────────────────────┘
+    │                        ┌──────────────┼──────────────┐
+    │                        ▼              ▼              ▼
+    ◄── Speaker (TTS) ──────┘     Telegram Bot    SimpleStorage
 ```
