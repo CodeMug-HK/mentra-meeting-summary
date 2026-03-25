@@ -86,7 +86,7 @@ class MeetingSummaryApp extends AppServer {
       if (!data.isFinal) return;
 
       // === Global commands (work anytime) ===
-      if (textLower.includes("mahjong") || textLower.includes("麻雀") || textLower.includes("ma jong") || textLower.includes("mah jong")) {
+      if (textLower.includes("mahjong") || textLower.includes("麻雀") || textLower.includes("ma jong") || textLower.includes("mah jong") || textLower.includes("ma chong") || textLower.includes("ma cheng")) {
         this.handleMahjong(state, sessionId);
         return;
       }
