@@ -1,7 +1,8 @@
 import { AppServer, AppSession } from "@mentra/sdk";
 import { TranscriptBuffer } from "./transcript";
 import { generateSummary, type AIBackend } from "./ai";
-import { sendTelegramMessage } from "./telegram";
+import { analyzeMahjong } from "./vision";
+import { sendTelegramMessage, sendTelegramPhoto } from "./telegram";
 
 const PACKAGE_NAME =
   process.env.PACKAGE_NAME ??
@@ -20,6 +21,7 @@ interface SessionState {
   session: AppSession;
   transcript: TranscriptBuffer;
   summarizing: boolean;
+  analyzing: boolean;
 }
 
 class MeetingSummaryApp extends AppServer {
@@ -43,22 +45,27 @@ class MeetingSummaryApp extends AppServer {
       session,
       transcript: new TranscriptBuffer(),
       summarizing: false,
+      analyzing: false,
     };
     this.sessions.set(sessionId, state);
 
     session.logger.info(`User ${userId} connected`);
-    await session.audio.speak("Meeting Summary ready. Say Start Meeting to begin recording.");
+    await session.audio.speak("Ready. Say Start Meeting, or say Mahjong to analyze tiles.");
 
     // Button: short press = start/stop recording, long press = summarize
     session.events.onButtonPress((data) => {
       session.logger.info(`Button: ${data.pressType}`);
 
       if (data.pressType === "long") {
-        this.handleSummarize(state, sessionId);
+        if (state.transcript.isRecording) {
+          this.stopRecording(state, sessionId);
+        } else {
+          this.handleSummarize(state, sessionId);
+        }
         return;
       }
 
-      // Short press toggles recording
+      // Short press: toggle recording or take mahjong photo
       if (state.transcript.isRecording) {
         this.stopRecording(state, sessionId);
       } else {
@@ -71,17 +78,27 @@ class MeetingSummaryApp extends AppServer {
       const text = data.text.trim();
       const textLower = text.toLowerCase();
 
-      // Log all transcriptions for debugging
+      // Log all final transcriptions for debugging
       if (data.isFinal) {
         session.logger.info(`[${sessionId}] Transcription (final, recording=${state.transcript.isRecording}): "${text}"`);
       }
 
-      // Only process final transcriptions for commands
       if (!data.isFinal) return;
 
-      // Check for voice commands when NOT recording
+      // === Global commands (work anytime) ===
+      if (textLower.includes("mahjong") || textLower.includes("麻雀") || textLower.includes("ma jong") || textLower.includes("mah jong")) {
+        this.handleMahjong(state, sessionId);
+        return;
+      }
+
+      // === Commands when NOT recording ===
       if (!state.transcript.isRecording) {
-        if (textLower.includes("start meeting") || textLower.includes("start recording")) {
+        if (
+          textLower.includes("start meeting") ||
+          textLower.includes("start recording") ||
+          textLower.includes("begin meeting") ||
+          textLower.includes("record")
+        ) {
           this.startRecording(state, sessionId);
           return;
         }
@@ -92,8 +109,13 @@ class MeetingSummaryApp extends AppServer {
         return;
       }
 
-      // While recording: check for stop/summarize commands
-      if (textLower.includes("stop meeting") || textLower.includes("stop recording") || textLower.includes("end meeting")) {
+      // === Commands while recording ===
+      if (
+        textLower.includes("stop meeting") ||
+        textLower.includes("stop recording") ||
+        textLower.includes("end meeting") ||
+        textLower.includes("end recording")
+      ) {
         this.stopRecording(state, sessionId);
         return;
       }
@@ -101,11 +123,10 @@ class MeetingSummaryApp extends AppServer {
       if (textLower.includes("meeting status")) {
         const stats = state.transcript.getStats();
         session.audio.speak(stats);
-        session.logger.info(`[${sessionId}] Status: ${stats}`);
         return;
       }
 
-      // Record the transcription (speakerId is optional in TranscriptionData)
+      // Record the transcription
       state.transcript.addEntry(
         data.speakerId,
         text,
@@ -117,14 +138,15 @@ class MeetingSummaryApp extends AppServer {
     });
   }
 
+  // ========== Meeting Recording ==========
+
   private startRecording(state: SessionState, sessionId: string): void {
     state.transcript.start();
     state.session.audio.speak("Recording started.");
     state.session.logger.info(`[${sessionId}] Recording started`);
 
-    // Solid green LED to indicate recording
     if (state.session.capabilities?.hasLight) {
-      state.session.led?.solid("green", 3600000); // 1 hour max
+      state.session.led?.solid("green", 3600000);
     }
   }
 
@@ -134,12 +156,10 @@ class MeetingSummaryApp extends AppServer {
     state.session.audio.speak(`Recording stopped. ${stats}. Generating summary now.`);
     state.session.logger.info(`[${sessionId}] Recording stopped: ${stats}`);
 
-    // Turn off LED
     if (state.session.capabilities?.hasLight) {
       state.session.led?.turnOff();
     }
 
-    // Auto-generate summary after stopping
     this.handleSummarize(state, sessionId);
   }
 
@@ -154,16 +174,14 @@ class MeetingSummaryApp extends AppServer {
       return;
     }
 
-    // Stop recording if still active
     if (state.transcript.isRecording) {
       state.transcript.stop();
     }
 
     state.summarizing = true;
-    state.session.audio.speak("Generating meeting summary. This may take a moment.");
+    state.session.audio.speak("Generating meeting summary.");
     state.session.logger.info(`[${sessionId}] Generating summary with ${AI_BACKEND}...`);
 
-    // Blink blue LED while summarizing
     if (state.session.capabilities?.hasLight) {
       state.session.led?.blink("blue", 500, 500, 60);
     }
@@ -175,16 +193,13 @@ class MeetingSummaryApp extends AppServer {
       const summary = await generateSummary(transcriptText, AI_BACKEND);
       state.session.logger.info(`[${sessionId}] Summary:\n${summary}`);
 
-      // Read summary aloud via TTS
       await state.session.audio.speak(summary);
 
-      // Send summary to Telegram
       const telegramMsg = `*Meeting Summary*\n${state.transcript.getStats()}\n\n${summary}`;
       sendTelegramMessage(telegramMsg).catch((err) =>
         state.session.logger.error(`[${sessionId}] Telegram error: ${err}`),
       );
 
-      // Store summary for retrieval
       await state.session.simpleStorage?.set(
         `summary-${Date.now()}`,
         JSON.stringify({
@@ -200,6 +215,57 @@ class MeetingSummaryApp extends AppServer {
       state.session.audio.speak("Sorry, failed to generate summary. Please try again.");
     } finally {
       state.summarizing = false;
+      if (state.session.capabilities?.hasLight) {
+        state.session.led?.turnOff();
+      }
+    }
+  }
+
+  // ========== Mahjong Analysis ==========
+
+  private async handleMahjong(state: SessionState, sessionId: string): Promise<void> {
+    if (state.analyzing) {
+      state.session.audio.speak("Already analyzing. Please wait.");
+      return;
+    }
+
+    if (!state.session.capabilities?.hasCamera) {
+      state.session.audio.speak("No camera available on this device.");
+      return;
+    }
+
+    state.analyzing = true;
+    state.session.audio.speak("Taking photo of mahjong tiles.");
+    state.session.logger.info(`[${sessionId}] Mahjong: taking photo...`);
+
+    if (state.session.capabilities?.hasLight) {
+      state.session.led?.blink("orange", 300, 300, 30);
+    }
+
+    try {
+      const photo = await state.session.camera.requestPhoto({
+        size: "large",
+        compress: "medium",
+      });
+
+      state.session.logger.info(`[${sessionId}] Mahjong: photo received (${photo.size} bytes), analyzing...`);
+      state.session.audio.speak("Photo taken. Analyzing tiles now.");
+
+      const result = await analyzeMahjong(photo.buffer, photo.mimeType);
+      state.session.logger.info(`[${sessionId}] Mahjong result:\n${result}`);
+
+      // Read result aloud
+      await state.session.audio.speak(result);
+
+      // Send photo + result to Telegram
+      sendTelegramPhoto(photo.buffer, `mahjong_${Date.now()}.jpg`, result).catch((err) =>
+        state.session.logger.error(`[${sessionId}] Telegram photo error: ${err}`),
+      );
+    } catch (err) {
+      state.session.logger.error(`[${sessionId}] Mahjong error: ${err}`);
+      state.session.audio.speak("Sorry, failed to analyze mahjong tiles. Please try again.");
+    } finally {
+      state.analyzing = false;
       if (state.session.capabilities?.hasLight) {
         state.session.led?.turnOff();
       }
