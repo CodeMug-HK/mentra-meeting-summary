@@ -5,6 +5,7 @@ COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile --production
 
 COPY src ./src
+COPY public ./public
 COPY tsconfig.json ./
 
 EXPOSE 3000
