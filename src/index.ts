@@ -14,7 +14,7 @@ const MENTRAOS_API_KEY =
     throw new Error("MENTRAOS_API_KEY is not set");
   })();
 const PORT = parseInt(process.env.PORT || "3000");
-const AI_BACKEND = (process.env.AI_BACKEND || "gemini") as AIBackend;
+const AI_BACKEND = (process.env.AI_BACKEND || "qwen") as AIBackend;
 
 interface SessionState {
   session: AppSession;
@@ -71,6 +71,11 @@ class MeetingSummaryApp extends AppServer {
       const text = data.text.trim();
       const textLower = text.toLowerCase();
 
+      // Log all transcriptions for debugging
+      if (data.isFinal) {
+        session.logger.info(`[${sessionId}] Transcription (final, recording=${state.transcript.isRecording}): "${text}"`);
+      }
+
       // Only process final transcriptions for commands
       if (!data.isFinal) return;
 
@@ -126,13 +131,16 @@ class MeetingSummaryApp extends AppServer {
   private stopRecording(state: SessionState, sessionId: string): void {
     state.transcript.stop();
     const stats = state.transcript.getStats();
-    state.session.audio.speak(`Recording stopped. ${stats}. Say Summarize to generate summary.`);
+    state.session.audio.speak(`Recording stopped. ${stats}. Generating summary now.`);
     state.session.logger.info(`[${sessionId}] Recording stopped: ${stats}`);
 
     // Turn off LED
     if (state.session.capabilities?.hasLight) {
       state.session.led?.turnOff();
     }
+
+    // Auto-generate summary after stopping
+    this.handleSummarize(state, sessionId);
   }
 
   private async handleSummarize(state: SessionState, sessionId: string): Promise<void> {
