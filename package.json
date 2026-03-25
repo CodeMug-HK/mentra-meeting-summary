@@ -1,0 +1,20 @@
+{
+  "name": "mentra-meeting-summary",
+  "version": "1.0.0",
+  "description": "MentraOS app for Mentra Live - AI-powered meeting summary with speaker diarization",
+  "displayName": "Meeting Summary",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "dev": "bun --hot src/index.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "@mentra/sdk": "latest"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^22.13.14"
+  }
+}
